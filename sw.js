@@ -1,4 +1,4 @@
-const CACHE = 'earnings-log-v18';
+const CACHE = 'earnings-log-v19';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './qrcode.js',
   './apple-touch-icon.png', './icon-192.png', './icon-512.png'];
 
