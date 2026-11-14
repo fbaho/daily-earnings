@@ -305,6 +305,30 @@
   .tabbar button.active{color:var(--accent);}
   .tabbar button.active svg{filter:drop-shadow(0 0 7px rgba(233,185,84,.5));}
   .tabbar svg{width:23px;height:23px;}
+
+  /* ===== 备份提醒条 ===== */
+  .backup-tip{display:flex;align-items:center;gap:10px;margin:-4px 0 14px;padding:11px 13px;
+    border:1px solid rgba(233,185,84,.35);background:rgba(233,185,84,.06);border-radius:14px;}
+  .backup-tip .bt-icon{font-size:15px;flex-shrink:0}
+  .backup-tip .bt-text{flex:1;font-size:12px;color:var(--muted);line-height:1.55;min-width:0}
+  .backup-tip .bt-text b{color:var(--accent);font-weight:600}
+  .backup-tip .bt-btn{flex-shrink:0;border:1px solid rgba(233,185,84,.5);background:rgba(233,185,84,.12);
+    color:var(--accent);border-radius:9px;padding:6px 11px;font-size:12px;font-weight:600;
+    font-family:inherit;cursor:pointer;letter-spacing:.5px}
+  .backup-tip .bt-close{flex-shrink:0;border:none;background:none;color:var(--faint);
+    font-size:13px;padding:2px 2px;cursor:pointer}
+
+  /* ===== 年度目标进度 ===== */
+  .goal-empty{color:var(--muted);font-size:13px;padding:4px 0 2px}
+  .goal-top{display:flex;align-items:baseline;justify-content:space-between;margin:2px 0 11px}
+  .goal-pct{font-size:27px;font-weight:700;color:var(--accent);letter-spacing:.5px}
+  .goal-pct i{font-style:normal;font-size:14px;margin-left:1px}
+  .goal-rest{font-size:12px;color:var(--muted)}
+  .goal-bar{height:8px;border-radius:99px;background:rgba(255,255,255,.06);overflow:hidden}
+  .goal-bar i{display:block;height:100%;border-radius:99px;
+    background:linear-gradient(90deg,#a8842f,var(--accent));transition:width .6s ease}
+  .goal-bar i.glow{box-shadow:0 0 11px rgba(233,185,84,.55)}
+  .goal-sub{margin-top:9px;font-size:11.5px;color:var(--faint);letter-spacing:.2px}
 </style>
 </head>
 <body>
@@ -327,10 +351,22 @@
       <div class="sub" id="hero-sub"></div>
     </section>
 
+    <div class="backup-tip" id="backup-tip" style="display:none">
+      <span class="bt-icon">⚠️</span>
+      <span class="bt-text" id="backup-tip-text"></span>
+      <button class="bt-btn" id="backup-now">立即备份</button>
+      <button class="bt-close" id="backup-close">✕</button>
+    </div>
+
     <div class="stats">
       <div class="card"><div class="label">本月收入</div><div class="value" id="st-month">¥0</div></div>
       <div class="card"><div class="label">今日收入</div><div class="value" id="st-today">¥0</div></div>
       <div class="card"><div class="label">日均（不含补记）</div><div class="value" id="st-avg">¥0</div></div>
+    </div>
+
+    <div class="panel" id="goal-panel" style="cursor:pointer" onclick="editGoal()">
+      <h2>年度目标</h2>
+      <div id="goal-body"></div>
     </div>
 
     <div class="panel">
@@ -525,6 +561,8 @@ const pad = n => String(n).padStart(2, '0');
 
 // ===== 收入来源：内置四个，可自行新增 =====
 const SRC_KEY = 'earnings-sources-v1';
+const GOAL_KEY = 'earnings-goal-v1';      // 年度目标金额
+const BK_KEY = 'earnings-lastbackup-v1';  // 最近一次备份时间戳
 const DEFAULT_SOURCES = ['小红书','工资','课消','微信'];
 const SRC_COLORS = ['#e9b954','#6fb3ff','#7ee2a8','#f28b82','#c39bff','#e8926f','#5fd4c4','#d4a5e8','#9db88a','#8899cc'];
 let sources;
@@ -669,6 +707,22 @@ function render(){
   $('hero-sub').innerHTML = '共 <b>' + records.length + '</b> 笔' +
     (lumpCount ? ' · 补记 <b>' + lumpCount + '</b> 笔' + (spreadCount ? '（已平摊到每天）' : '') : '') +
     '<br>日均 <b>' + avgShow + '</b>（每日记录，不含补记）';
+
+  // ===== 年度目标进度 =====
+  const goal = parseFloat(localStorage.getItem(GOAL_KEY)) || 0;
+  if(goal > 0){
+    const pct = Math.min(yTotal / goal * 100, 100);
+    const over = yTotal - goal;
+    $('goal-body').innerHTML =
+      '<div class="goal-top"><span class="goal-pct">' + (over >= 0 ? '🎉 ' : '') + pct.toFixed(1) + '<i>%</i></span>' +
+        '<span class="goal-rest">' + (over >= 0 ? '已超出 ' + fmt(over) : '还差 ' + fmt(-over)) + '</span></div>' +
+      '<div class="goal-bar"><i' + (over >= 0 ? ' class="glow"' : '') + ' style="width:' + pct + '%"></i></div>' +
+      '<div class="goal-sub">目标 ' + fmt(goal) + ' · 今年已收入 ' + fmt(yTotal) + ' · 点击修改</div>';
+  } else {
+    $('goal-body').innerHTML = '<div class="goal-empty">🎯 设定一个今年的收入目标，随时看完成进度</div>';
+  }
+
+  renderBackupBar();
 
   // 主页：最近收入（最新 5 笔）
   const recent = records.slice(0, 5);
@@ -991,8 +1045,7 @@ function download(filename, content, type){
   a.download = filename; a.click();
   URL.revokeObjectURL(a.href);
 }
-$('export-json').addEventListener('click', () =>
-  download('记账备份-' + new Date().toISOString().slice(0,10) + '.json', JSON.stringify(records, null, 2), 'application/json'));
+$('export-json').addEventListener('click', doExportBackup);
 $('export-csv').addEventListener('click', () => {
   const csv = '日期,金额,是否补记,收入来源,分摊方式\n' + records.map(r =>
     r.date + ',' + r.amount + ',' + (r.lump ? '补记' : '每日') + ',' + (r.src || '') + ',' +
@@ -1029,6 +1082,61 @@ $('import-file').addEventListener('change', e => {
   reader.readAsText(f);
   e.target.value = '';
 });
+
+// ===== 备份提醒：记录只存在本机，超过 7 天没备份就在主页提示 =====
+let backupDismissed = false;
+function markBackup(){
+  localStorage.setItem(BK_KEY, String(Date.now()));
+  renderBackupBar();
+}
+function doExportBackup(){
+  download('记账备份-' + new Date().toISOString().slice(0,10) + '.json', JSON.stringify(records, null, 2), 'application/json');
+  markBackup();
+  toast('备份已导出，请妥善保存 ✓');
+}
+function renderBackupBar(){
+  const el = $('backup-tip');
+  if(!el) return;
+  if(backupDismissed || !records.length){ el.style.display = 'none'; return; }
+  const last = +localStorage.getItem(BK_KEY) || 0;
+  if(last && Date.now() - last < 7*86400000){ el.style.display = 'none'; return; }
+  $('backup-tip-text').innerHTML = last
+    ? '已 <b>' + Math.floor((Date.now() - last) / 86400000) + '</b> 天没备份了，记录只存在这台设备上，建议导出一份留底'
+    : '记录只存在这台设备上，<b>还没备份过</b>，建议导出一份留底';
+  el.style.display = '';
+}
+$('backup-now').addEventListener('click', doExportBackup);
+$('backup-close').addEventListener('click', () => { backupDismissed = true; renderBackupBar(); });
+
+// ===== 年度目标：点击设置 / 修改 =====
+function editGoal(){
+  const cur = localStorage.getItem(GOAL_KEY) || '';
+  const v = prompt('今年的收入目标是多少（元）？\n（想取消目标：清空输入后点确定）', cur);
+  if(v === null) return;
+  const n = parseFloat(String(v).replace(/[^\d.]/g, ''));
+  if(String(v).trim() !== '' && !(n > 0)){ toast('金额无效，请输入正数'); return; }
+  if(n > 0){ localStorage.setItem(GOAL_KEY, String(n)); toast('年度目标：' + fmt(n)); }
+  else { localStorage.removeItem(GOAL_KEY); toast('已取消年度目标'); }
+  render();
+}
+window.editGoal = editGoal;
+
+// 复制备份（发微信）
+$('copy-backup').addEventListener('click', () => {
+  if(!records.length){ toast('还没有数据可复制'); return; }
+  const text = JSON.stringify(records, null, 2);
+  const done = () => { markBackup(); toast('备份已复制，粘贴发给微信/文件传输助手'); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done, () => fallbackCopyText(text, done));
+  } else fallbackCopyText(text, done);
+});
+function fallbackCopyText(text, done){
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); done(); }catch(e){ toast('复制失败，请用「导出备份（存文件）」'); }
+  document.body.removeChild(ta);
+}
 
 // 初始化
 const now = new Date();
@@ -1075,6 +1183,7 @@ $('transfer-btn').addEventListener('click', () => {
     qr.make();
     $('qr-box').innerHTML = qr.createSvgTag({cellSize: 4, margin: 0, scalable: true});
   }catch(e){ $('qr-box').innerHTML = '<div style="width:170px;height:170px;display:flex;align-items:center;justify-content:center;color:#333;font-size:12px">二维码生成失败<br>请用下方链接</div>'; }
+  markBackup();
   $('transfer-panel').scrollIntoView({behavior:'smooth'});
 });
 
