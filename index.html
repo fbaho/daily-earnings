@@ -329,6 +329,26 @@
     background:linear-gradient(90deg,#a8842f,var(--accent));transition:width .6s ease}
   .goal-bar i.glow{box-shadow:0 0 11px rgba(233,185,84,.55)}
   .goal-sub{margin-top:9px;font-size:11.5px;color:var(--faint);letter-spacing:.2px}
+
+  /* ===== 每日模式：月历（每格直接显示当天金额） ===== */
+  .cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .cal-nav button{width:36px;height:30px;border-radius:9px;border:1px solid var(--border);
+    background:var(--panel2);color:var(--text);font-size:16px;font-family:inherit;cursor:pointer;
+    line-height:1;padding-bottom:2px}
+  .cal-nav button:disabled{opacity:.25;cursor:default}
+  .cal-nav .cal-title{font-size:13.5px;font-weight:650;letter-spacing:.5px}
+  .cal-nav .cal-title em{font-style:normal;color:var(--accent);font-size:11px;font-weight:550;margin-left:7px;letter-spacing:.3px}
+  .cal-week{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:5px}
+  .cal-week span{text-align:center;font-size:10px;color:var(--faint);letter-spacing:1.5px}
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+  .cal-cell{min-height:47px;border-radius:10px;padding:5px 2px 4px;display:flex;flex-direction:column;
+    justify-content:space-between;cursor:pointer;border:1px solid transparent;box-sizing:border-box}
+  .cal-cell.blank{background:transparent;cursor:default}
+  .cal-cell .d{font-size:9.5px;color:var(--faint);line-height:1;text-align:center}
+  .cal-cell .a{font-size:11px;font-weight:700;line-height:1.15;text-align:center;letter-spacing:.2px}
+  .cal-cell.zero{justify-content:center}
+  .cal-cell.dim{opacity:.5}
+  .cal-cell.today{border-color:var(--accent)}
 </style>
 </head>
 <body>
@@ -553,6 +573,7 @@ let records = JSON.parse(localStorage.getItem(KEY) || '[]');
 let editingId = null;
 let editingLump = false;
 let hmMode = 'day';   // 热力图模式：day / month / year
+let hmCalMonth = new Date().getMonth() + 1;   // 每日模式：当前显示的月份
 
 const $ = id => document.getElementById(id);
 // 金额统一保留两位小数（整数也补 .00）
@@ -831,28 +852,35 @@ function render(){
   const hmFg = (v, max) => (v > 0 && v / (max || 1) >= .55) ? 'color:#241a05' : '';
   const compactAmt = v => v >= 10000 ? '¥' + (v/10000).toFixed(1) + '万' : fmt(v);
 
-  // —— 每日：12 个月 × 31 天，每一格 = 一天 ——
+  // —— 每日：月历视图，每格直接写当天收入金额（颜色仍是热力梯度） ——
   const dayVals = Object.keys(dayMap).filter(d => d.startsWith(String(year))).map(d => dayMap[d]);
   const dMax = dayVals.length ? Math.max(...dayVals) : 0;
-  let dHead = '<div class="hm-cal-ml">';
-  for(let d = 1; d <= 31; d++) dHead += '<span>' + (d === 1 || d % 5 === 0 ? d : '') + '</span>';
-  dHead += '</div>';
-  let calRows = '';
-  for(let m = 0; m < 12; m++){
-    const dim = new Date(year, m + 1, 0).getDate();
-    calRows += '<div class="hm-cal-row"><span class="ml">' + (m+1) + '月</span>';
-    for(let d = 1; d <= 31; d++){
-      if(d > dim){ calRows += '<span class="hm-cell" style="background:transparent;visibility:hidden"></span>'; continue; }
-      const ds = year + '-' + pad(m+1) + '-' + pad(d);
-      const v = dayMap[ds] || 0;
-      const dv = dayView[ds];
-      const tip = ds + '：' + (v > 0 ? fmt(v) : '无记录') +
-        (dv && dv.lump > 0 ? '（含补记分摊 ' + fmt(dv.lump) + '）' : '');
-      calRows += '<span class="hm-cell" style="background:' + hmLevel(v, dMax) + '" title="' + tip + '" onclick="openDayModal(\'' + ds + '\')"></span>';
-    }
-    calRows += '</div>';
+  const amtCell = v => v >= 10000 ? (v/10000).toFixed(1).replace(/\.0$/, '') + '万' : String(Math.round(v));
+  const cm = hmCalMonth, dim = new Date(year, cm, 0).getDate();
+  const firstOff = (new Date(year, cm - 1, 1).getDay() + 6) % 7;   // 周一开头
+  const calMTotal = monMap[year + '-' + pad(cm)] || 0;
+  let calHtml = '<div class="cal-nav">' +
+    '<button' + (cm <= 1 ? ' disabled' : '') + ' onclick="hmNav(-1)">‹</button>' +
+    '<span class="cal-title">' + year + '年' + cm + '月<em>合计 ' + compactAmt(calMTotal) + '</em></span>' +
+    '<button' + (cm >= 12 ? ' disabled' : '') + ' onclick="hmNav(1)">›</button></div>';
+  calHtml += '<div class="cal-week">' + ['一','二','三','四','五','六','日'].map(w => '<span>' + w + '</span>').join('') + '</div><div class="cal-grid">';
+  for(let i = 0; i < firstOff; i++) calHtml += '<div class="cal-cell blank"></div>';
+  for(let d = 1; d <= dim; d++){
+    const ds = year + '-' + pad(cm) + '-' + pad(d);
+    const v = dayMap[ds] || 0;
+    const isToday = ds === todayStr, isFuture = ds > todayStr;
+    const fg = hmFg(v, dMax);
+    const dv = dayView[ds];
+    const tip = ds + '：' + (v > 0 ? fmt(v) : '无记录') +
+      (dv && dv.lump > 0 ? '（含补记分摊 ' + fmt(dv.lump) + '）' : '');
+    calHtml += '<div class="cal-cell' + (v > 0 ? '' : ' zero') + (isToday ? ' today' : '') + (isFuture ? ' dim' : '') +
+      '" style="background:' + hmLevel(v, dMax) + '" title="' + tip + '" onclick="openDayModal(\'' + ds + '\')">' +
+      '<span class="d" style="' + fg + '">' + d + '</span>' +
+      (v > 0 ? '<span class="a" style="' + fg + '">' + amtCell(v) + '</span>' : '') +
+    '</div>';
   }
-  $('hm-day').innerHTML = '<div class="hm-cal">' + dHead + calRows + '</div>';
+  calHtml += '</div>';
+  $('hm-day').innerHTML = calHtml;
 
   // —— 每月：今年 12 个月格子 ——
   const monVals = Object.keys(monMap).filter(k => k.startsWith(String(year))).map(k => monMap[k]);
@@ -882,7 +910,7 @@ function render(){
   $('hm-scale').style.display = hasData ? '' : 'none';
   ['day','month','year'].forEach(m => { $('hm-' + m).style.display = (hasData && hmMode === m) ? '' : 'none'; });
   $('hm-tip').style.display = (hasData && hmMode !== 'year') ? '' : 'none';
-  $('hm-tip').textContent = hmMode === 'month' ? '点某个月可补记该月收入' : '点任意一天可直接记账';
+  $('hm-tip').textContent = hmMode === 'month' ? '点某个月可补记该月收入' : '每格是当天收入 · 点任意一天可直接记账 · ‹ › 切换月份';
   const activeDays = Object.keys(dayMap).filter(d => d.startsWith(String(year))).length;
   const curYear = String(year);
   $('hm-total').textContent = !hasData ? '' :
@@ -999,9 +1027,11 @@ function openDayModal(date){
   $('day-modal-title').textContent = (+date.slice(5,7)) + '月' + (+date.slice(8,10)) + '日 · ' + WD[d.getDay()];
   const exist = records.filter(r => r.date === date);
   const sum = exist.reduce((s,r) => s + r.amount, 0);
+  const dv = buildDayView()[date];
+  const spread = dv ? dv.lump : 0;
   $('day-modal-exist').textContent = exist.length
-    ? ('当天已有 ' + exist.length + ' 笔，合计 ' + fmt(sum) + '　可追加或删除')
-    : '这天还没有记录';
+    ? ('当天已有 ' + exist.length + ' 笔，合计 ' + fmt(sum) + (spread > 0 ? ' · 另有补记分摊 ' + fmt(spread) : '') + '　可追加或删除')
+    : (spread > 0 ? '这天暂无手动记录 · 含补记分摊 ' + fmt(spread) : '这天还没有记录');
   $('day-del').style.display = exist.length ? '' : 'none';
   $('day-amount').value = '';
   $('day-src').innerHTML = '<option value="">来源（可不选）</option>' +
@@ -1020,6 +1050,12 @@ function openMonthLump(m){
 window.openDayModal = openDayModal;
 window.closeDayModal = closeDayModal;
 window.openMonthLump = openMonthLump;
+// 每日模式月历：切换月份
+function hmNav(d){
+  hmCalMonth = Math.min(12, Math.max(1, hmCalMonth + d));
+  render();
+}
+window.hmNav = hmNav;
 $('day-cancel').addEventListener('click', closeDayModal);
 $('day-modal').addEventListener('click', e => { if(e.target === $('day-modal')) closeDayModal(); });
 $('day-amount').addEventListener('keydown', e => { if(e.key === 'Enter') $('day-save').click(); });
